@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Lista de la compra</title>
+<meta name="theme-color" content="#f4f7f8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f7f8;--card:#fff;--ink:#16252b;--mute:#6b7c84;--line:#d9e2e6;--marker:#1f6fe0;--ok:#1a9a5b;--warn:#c4472b}
+@media (prefers-color-scheme:dark){:root{--bg:#10181c;--card:#18242a;--ink:#e8f0f3;--mute:#8da0a8;--line:#2a3a41;--marker:#5b9bff;--ok:#3ec585;--warn:#ff7a5c}}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:400 17px/1.4 "Bricolage Grotesque",system-ui,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:560px;margin:0 auto;padding:20px 16px 80px}
+h1{font-size:34px;font-weight:800;letter-spacing:-.02em;margin:8px 0 4px}
+.sub{color:var(--mute);margin:0 0 18px;font-size:15px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px}
+button,.btn{font:600 16px inherit;font-family:inherit;border:0;border-radius:12px;padding:12px 16px;background:var(--marker);color:#fff;cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+button.alt,.btn.alt{background:transparent;color:var(--ink);border:1.5px solid var(--line)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--marker);outline-offset:2px}
+input[type=file]{display:none}
+.add{display:flex;gap:8px;margin-bottom:14px}
+.add input,textarea{flex:1;font:inherit;padding:12px 14px;border-radius:12px;border:1.5px solid var(--line);background:var(--card);color:var(--ink);width:100%}
+ul{list-style:none;margin:0;padding:0;background:var(--card);border-radius:16px;border:1px solid var(--line)}
+li{display:flex;align-items:center;gap:14px;padding:14px 16px;border-bottom:1px solid var(--line)}
+li:last-child{border-bottom:0}
+li input{width:26px;height:26px;accent-color:var(--ok);flex:none}
+li span{flex:1;word-break:break-word}
+li.done span{text-decoration:line-through;text-decoration-thickness:2px;text-decoration-color:var(--marker);color:var(--mute)}
+li .x{background:none;color:var(--mute);padding:6px 10px;font-size:20px}
+.empty{padding:28px 16px;text-align:center;color:var(--mute)}
+.panel{background:var(--card);border:1.5px solid var(--marker);border-radius:16px;padding:16px;margin-bottom:16px}
+.panel h2{font-size:18px;margin:0 0 4px}
+.panel p{margin:0 0 10px;color:var(--mute);font-size:14px}
+textarea{min-height:140px;resize:vertical}
+.note{font-size:14px;color:var(--mute);margin-top:16px}
+.note b{color:var(--warn)}
+progress{width:100%;height:8px;accent-color:var(--marker);margin:8px 0}
+.row{display:flex;gap:8px;margin-top:10px}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:no-preference){li{transition:background .15s}}
+</style>
+</head>
+<body>
+<main>
+  <h1>Lista de la compra</h1>
+  <p class="sub" id="sub">Haz una foto a la pizarra: solo cuenta lo que va tras un guion.</p>
+
+  <div class="bar">
+    <label class="btn" for="foto">📷 Foto de la pizarra</label>
+    <input id="foto" type="file" accept="image/*" capture="environment">
+    <button class="alt" id="share">Compartir lista</button>
+    <button class="alt" id="clear">Quitar comprados</button>
+  </div>
+
+  <section class="panel" id="rev" hidden>
+    <h2>Esto he leído</h2>
+    <p id="revp">Corrige lo que haga falta. Una línea por producto.</p>
+    <progress id="prog" max="1" value="0" hidden></progress>
+    <textarea id="txt" spellcheck="false"></textarea>
+    <div class="row">
+      <button id="ok">Añadir a la lista</button>
+      <button class="alt" id="no">Descartar</button>
+    </div>
+  </section>
+
+  <form class="add" id="f">
+    <input id="n" placeholder="Añadir producto" autocomplete="off" aria-label="Añadir producto">
+    <button>Añadir</button>
+  </form>
+
+  <ul id="list"></ul>
+  <p class="note" id="note"></p>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script>
+/* 1) Pega aquí tu configuración de Firebase (Realtime Database).
+      Sin ella la lista funciona solo en este móvil. */
+const FIREBASE_CONFIG = {
+  // apiKey: "...",
+  // authDomain: "...",
+  // databaseURL: "https://TU-PROYECTO-default-rtdb.europe-west1.firebasedatabase.app",
+  // projectId: "..."
+};
+
+const $ = id => document.getElementById(id);
+const params = new URLSearchParams(location.search);
+let code = params.get('l');
+try { code = code || localStorage.getItem('lista-codigo'); } catch (e) {}
+if (!code) { code = Math.random().toString(36).slice(2, 10); }
+try { localStorage.setItem('lista-codigo', code); } catch (e) {}
+try { if (params.get('l') !== code) history.replaceState(null, '', '?l=' + code); } catch (e) {}
+
+let cloud = !!(FIREBASE_CONFIG.databaseURL && window.firebase);
+let items = {}, ref = null;
+
+function load() { try { return JSON.parse(localStorage.getItem('lista-' + code) || '{}'); } catch (e) { return {}; } }
+function save() { try { localStorage.setItem('lista-' + code, JSON.stringify(items)); } catch (e) {} }
+
+if (cloud) {
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    ref = firebase.database().ref('listas/' + code + '/items');
+    ref.on('value', s => { items = s.val() || {}; render(); });
+  } catch (e) { cloud = false; }
+}
+if (!cloud) { items = load(); }
+window.addEventListener('error', e => { const n = $('note'); if (n) n.textContent = 'Error: ' + (e.message || 'desconocido'); });
+
+function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 5); }
+function addItem(t) {
+  t = t.trim(); if (!t) return;
+  const id = uid(), v = { t, d: false, ts: Date.now() };
+  items[id] = v; if (cloud) ref.child(id).set(v); else save(); render();
+}
+function setDone(id, d) { items[id].d = d; if (cloud) ref.child(id).update({ d }); else save(); render(); }
+function del(id) { delete items[id]; if (cloud) ref.child(id).remove(); else save(); render(); }
+
+function render() {
+  const ids = Object.keys(items).sort((a, b) => (items[a].d - items[b].d) || (items[a].ts - items[b].ts));
+  const ul = $('list'); ul.innerHTML = '';
+  if (!ids.length) { ul.innerHTML = '<div class="empty">La lista está vacía. Haz una foto o añade un producto.</div>'; }
+  ids.forEach(id => {
+    const it = items[id], li = document.createElement('li');
+    if (it.d) li.className = 'done';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = it.d;
+    cb.setAttribute('aria-label', it.t); cb.onchange = () => setDone(id, cb.checked);
+    const sp = document.createElement('span'); sp.textContent = it.t;
+    const x = document.createElement('button'); x.className = 'x'; x.textContent = '✕'; x.setAttribute('aria-label', 'Borrar ' + it.t); x.onclick = () => del(id);
+    li.append(cb, sp, x); ul.append(li);
+  });
+  $('note').innerHTML = cloud ? '' : '<b>Modo local:</b> la lista no se comparte hasta que añadas la configuración de Firebase en index.html.';
+}
+
+$('f').onsubmit = e => { e.preventDefault(); addItem($('n').value); $('n').value = ''; };
+$('clear').onclick = () => Object.keys(items).filter(i => items[i].d).forEach(del);
+$('share').onclick = async () => {
+  const url = location.origin + location.pathname + '?l=' + code;
+  try { if (navigator.share) { await navigator.share({ title: 'Lista de la compra', url }); return; } } catch (e) { return; }
+  try { await navigator.clipboard.writeText(url); alert('Enlace copiado. Envíaselo a quien comparta la lista.'); } catch (e) { prompt('Copia este enlace:', url); }
+};
+
+/* Foto -> OCR -> líneas con guion */
+function prep(file) {
+  return new Promise(res => {
+    const img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 1800 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas'); c.width = img.width * k; c.height = img.height * k;
+      const g = c.getContext('2d'); g.drawImage(img, 0, 0, c.width, c.height);
+      const d = g.getImageData(0, 0, c.width, c.height), p = d.data;
+      for (let i = 0; i < p.length; i += 4) {
+        let y = .3 * p[i] + .59 * p[i + 1] + .11 * p[i + 2];
+        y = Math.max(0, Math.min(255, (y - 128) * 1.5 + 128 + 20));
+        p[i] = p[i + 1] = p[i + 2] = y;
+      }
+      g.putImageData(d, 0, 0); c.toBlob(res, 'image/png');
+    };
+    img.src = URL.createObjectURL(file);
+  });
+}
+const DASH = /^\s*[-–—−_~•·*]+\s*(.+)$/;
+function parse(text) {
+  return text.split(/\r?\n/).map(l => { const m = l.match(DASH); return m ? m[1].replace(/\s+/g, ' ').trim() : ''; }).filter(Boolean);
+}
+$('foto').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('rev').hidden = false; $('txt').value = ''; $('prog').hidden = false; $('prog').value = 0;
+  $('revp').textContent = 'Leyendo la pizarra…';
+  try {
+    const blob = await prep(f);
+    if (!window.Tesseract) throw new Error('sin-tesseract');
+    const estados = { 'loading tesseract core': 'Cargando el lector…', 'initializing tesseract': 'Preparando el lector…', 'loading language traineddata': 'Descargando el idioma…', 'initializing api': 'Preparando el lector…', 'recognizing text': 'Leyendo la pizarra…' };
+    const ocr = Tesseract.recognize(blob, 'spa', { logger: m => {
+      if (estados[m.status]) $('revp').textContent = estados[m.status];
+      if (typeof m.progress === 'number') $('prog').value = m.progress;
+    } });
+    const r = await Promise.race([ocr, new Promise((_, rej) => setTimeout(() => rej(new Error('tiempo')), 90000))]);
+    const lines = parse(r.data.text);
+    $('txt').value = lines.join('\n');
+    $('revp').textContent = lines.length ? 'Corrige lo que haga falta. Una línea por producto.' : 'No he encontrado líneas con guion. Prueba con otra foto, más cerca y con buena luz, o escribe los productos aquí.';
+  } catch (err) { $('revp').textContent = 'No he podido leer la foto aquí (' + (err.message || 'error') + '). Abre la app desde GitHub Pages en Safari o escribe los productos en el cuadro.'; }
+  $('prog').hidden = true; e.target.value = '';
+};
+$('ok').onclick = () => { $('txt').value.split('\n').forEach(addItem); $('rev').hidden = true; };
+$('no').onclick = () => { $('rev').hidden = true; };
+
+render();
+if ('serviceWorker' in navigator) {}
+</script>
+</body>
+</html>
